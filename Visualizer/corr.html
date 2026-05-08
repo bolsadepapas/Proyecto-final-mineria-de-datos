@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Análisis de Invasión y Proyección de Riesgo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #0b0e14; color: #e0e0e0; margin: 30px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+        .card { background: #161b22; padding: 25px; border-radius: 12px; border: 1px solid #30363d; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .full { grid-column: 1 / -1; }
+        h2 { color: #58a6ff; margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+        .metric { font-size: 2rem; font-weight: bold; color: #3fb950; }
+        .label { font-size: 0.8rem; color: #8b949e; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+
+    <h1 style="text-align: center; color: #f0f6fc;">Dashboard de Inteligencia Geoespacial: Amenaza a Áreas Protegidas</h1>
+    
+    <div class="grid">
+        <div class="card">
+            <h2>Eficacia de Monitoreo: IA vs. Registro Oficial</h2>
+            <canvas id="compChart"></canvas>
+            <p style="font-size: 0.8rem; color: #8b949e; margin-top: 10px;">
+                *Las barras azules representan casos validados por organismos estatales.
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>Invasión de Áreas Protegidas (Conteo de Focos)</h2>
+            <canvas id="areaChart"></canvas>
+        </div>
+
+        <div class="card full">
+            <h2>Proyección Matemática de Expansión (Modelado de Tendencia)</h2>
+            <div style="display: flex; justify-content: space-around; margin-bottom: 20px; text-align: center;">
+                <div>
+                    <span class="label">Tasa de Crecimiento Anual</span><br>
+                    <span id="growthRate" class="metric">0%</span>
+                </div>
+                <div>
+                    <span class="label">Predicción Focos 2025</span><br>
+                    <span id="pred2025" class="metric" style="color: #f85149;">0</span>
+                </div>
+                <div>
+                    <span class="label">Nivel de Alerta</span><br>
+                    <span id="alertLevel" class="metric" style="color: #f0883e;">ALTA</span>
+                </div>
+            </div>
+            <canvas id="projectionChart" style="max-height: 300px;"></canvas>
+        </div>
+    </div>
+
+    <script>
+        d3.csv("DATASET_ANALIZADO_PRO.csv").then(data => {
+            const años = [...new Set(data.map(d => d.Anio))].sort();
+            
+            // --- CORRECCIÓN DE BARRAS AZULES ---
+            // Filtramos de forma más flexible: cualquier cosa que NO sea "No registrado" cuenta como oficial
+            const conteoIA = años.map(a => data.filter(d => d.Anio == a).length);
+            const conteoOficial = años.map(a => data.filter(d => 
+                d.Anio == a && 
+                d.Deforestacion_Oficial.trim().toLowerCase() !== "no registrado"
+            ).length);
+
+            // --- TENDENCIA ÁREAS PROTEGIDAS ---
+            const invasiónAP = años.map(a => data.filter(d => 
+                d.Anio == a && 
+                d.Area_Protegida.trim().toLowerCase() !== "sin registro"
+            ).length);
+
+            // --- CÁLCULO DE PROYECCIÓN (Regresión Simple) ---
+            const n = conteoIA.length;
+            const x = Array.from({length: n}, (_, i) => i);
+            const y = conteoIA;
+            
+            const xSum = x.reduce((a, b) => a + b, 0);
+            const ySum = y.reduce((a, b) => a + b, 0);
+            const xySum = x.reduce((a, b, i) => a + x[i] * y[i], 0);
+            const xxSum = x.reduce((a, b) => a + b * b, 0);
+            
+            const pendiente = (n * xySum - xSum * ySum) / (n * xxSum - xSum * xSum);
+            const interseccion = (ySum - pendiente * xSum) / n;
+
+            const pred2025 = Math.round(pendiente * n + interseccion);
+            const pred2026 = Math.round(pendiente * (n + 1) + interseccion);
+            
+            // Actualizar métricas en pantalla
+            const growth = ((conteoIA[n-1] - conteoIA[0]) / conteoIA[0] * 100).toFixed(1);
+            document.getElementById('growthRate').innerText = growth + "%";
+            document.getElementById('pred2025').innerText = pred2025;
+
+            // --- GRÁFICOS ---
+
+            // 1. Barras Comparativas
+            new Chart(document.getElementById('compChart'), {
+                type: 'bar',
+                data: {
+                    labels: años,
+                    datasets: [
+                        { label: 'Detecciones IA', data: conteoIA, backgroundColor: '#58a6ff' },
+                        { label: 'Oficial (Mina Registrada)', data: conteoOficial, backgroundColor: '#3fb950' }
+                    ]
+                },
+                options: { plugins: { legend: { labels: { color: '#f0f6fc' } } } }
+            });
+
+            // 2. Línea Áreas Protegidas
+            new Chart(document.getElementById('areaChart'), {
+                type: 'line',
+                data: {
+                    labels: años,
+                    datasets: [{
+                        label: 'Focos dentro de Áreas Protegidas',
+                        data: invasiónAP,
+                        borderColor: '#f85149',
+                        backgroundColor: 'rgba(248, 81, 73, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                }
+            });
+
+            // 3. Proyección
+            new Chart(document.getElementById('projectionChart'), {
+                type: 'line',
+                data: {
+                    labels: [...años, "2025 (P)", "2026 (P)"],
+                    datasets: [
+                        {
+                            label: 'Histórico',
+                            data: conteoIA,
+                            borderColor: '#8b949e',
+                            borderDash: [5, 5]
+                        },
+                        {
+                            label: 'Proyección de Riesgo',
+                            data: [...Array(n-1).fill(null), conteoIA[n-1], pred2025, pred2026],
+                            borderColor: '#f85149',
+                            pointBackgroundColor: '#f85149',
+                            borderWidth: 3
+                        }
+                    ]
+                }
+            });
+        });
+    </script>
+</body>
+</html>
